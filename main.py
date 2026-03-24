@@ -1,4 +1,5 @@
-import os, requests, google.generativeai as genai
+import os, requests, re
+import google.generativeai as genai
 
 # 환경 변수 설정
 TELE_TOKEN = os.environ['TELEGRAM_TOKEN']
@@ -6,39 +7,32 @@ CHAT_ID = os.environ['CHAT_ID']
 genai.configure(api_key=os.environ['GEMINI_API_KEY'])
 
 def get_latest_article():
-    # 🎯 포필러스 진짜 데이터 서버 주소 (여기는 보안이 훨씬 유연합니다)
-    api_url = "https://api.4pillars.io/v1/articles?language=ko&limit=1"
-    
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Origin": "https://4pillars.io",
-        "Referer": "https://4pillars.io/"
-    }
+    # 🎯 포필러스 공식 RSS 피드 (차단 확률이 가장 낮습니다)
+    rss_url = "https://4pillars.io/ko/rss.xml"
+    headers = {"User-Agent": "Mozilla/5.0"}
     
     try:
-        res = requests.get(api_url, headers=headers, timeout=15)
-        # 만약 응답이 성공적이지 않으면 에러 출력
+        res = requests.get(rss_url, headers=headers, timeout=15)
         if res.status_code != 200:
             print(f"상태 코드 에러: {res.status_code}")
             return None
             
-        data = res.json()
-        # API 응답에서 첫 번째 기사의 슬러그 추출
-        # 데이터 구조: [ { "slug": "...", ... } ] 또는 { "data": [ { ... } ] }
-        articles = data.get('data', data) if isinstance(data, dict) else data
+        # XML 데이터에서 기사 링크 추출
+        # <link>https://4pillars.io/ko/articles/...</link> 패턴 찾기
+        links = re.findall(r'<link>(https://4pillars\.io/ko/articles/[^<]+)</link>', res.text)
         
-        if articles and len(articles) > 0:
-            slug = articles[0].get('slug')
-            return f"https://4pillars.io/ko/articles/{slug}"
+        if links:
+            # 첫 번째 링크가 가장 최신 글입니다
+            return links[0]
             
     except Exception as e:
-        print(f"데이터 서버 접속 에러: {e}")
+        print(f"RSS 피드 접속 에러: {e}")
     return None
 
 def main():
     latest_url = get_latest_article()
     if not latest_url:
-        print("최종 우회로도 차단되었습니다.")
+        print("RSS 피드에서도 기사를 찾지 못했습니다.")
         return
 
     # 중복 체크
@@ -50,13 +44,13 @@ def main():
 
     # Gemini 요약
     model = genai.GenerativeModel('gemini-1.5-flash')
-    prompt = f"아래 기사를 한국어로 3줄 요약해줘:\nURL: {latest_url}"
+    prompt = f"아래 기사 내용을 한국어로 요약해줘. 1문장 정의, 3가지 핵심 포인트, 시사점 순서로 작성해줘:\nURL: {latest_url}"
     
     try:
         response = model.generate_content(prompt)
         summary = response.text
     except Exception as e:
-        summary = f"(요약 에러 발생: 원문을 확인하세요)"
+        summary = f"(요약 생성 중 오류가 발생했습니다. 원문을 확인하세요.)"
 
     # 텔레그램 전송
     msg = f"🆕 **포필러스 최신 리서치**\n\n{summary}\n\n🔗 원문: {latest_url}"
@@ -66,7 +60,7 @@ def main():
     # 새로운 주소 저장
     with open("last_url.txt", "w") as f:
         f.write(latest_url)
-    print(f"✅ 전송 성공: {latest_url}")
+    print(f"✅ RSS를 통한 전송 성공: {latest_url}")
 
 if __name__ == "__main__":
     main()
