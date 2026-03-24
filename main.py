@@ -5,56 +5,50 @@ CHAT_ID = os.environ['CHAT_ID']
 genai.configure(api_key=os.environ['GEMINI_API_KEY'])
 
 def get_latest_article():
-    # 가장 단순한 메인 페이지 접속
-    url = "https://4pillars.io/ko/articles"
-    # 브라우저인 척 하는 헤더를 더 강력하게 세팅
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7"
-    }
+    # 🎯 우회로: AllOrigins라는 무료 프록시 서비스를 경유해서 접속합니다.
+    # 이렇게 하면 포필러스는 GitHub IP가 아닌 프록시 서버 IP를 보게 됩니다.
+    target_url = "https://4pillars.io/ko/articles"
+    proxy_url = f"https://api.allorigins.win/get?url={target_url}"
+    
     try:
-        res = requests.get(url, headers=headers, timeout=20)
-        # HTML 통째로 뒤져서 /ko/articles/로 시작하는 첫번째 주소 낚기
-        links = re.findall(r'/ko/articles/[a-zA-Z0-9-]+', res.text)
+        res = requests.get(proxy_url, timeout=30)
+        # 프록시 서비스는 실제 내용을 'contents'라는 키 안에 담아 줍니다.
+        html_content = res.json().get('contents', '')
+        
+        links = re.findall(r'/ko/articles/[a-zA-Z0-9-]+', html_content)
         if links:
-            # 중복 제거 후 첫번째 주소 완성
             unique_links = list(dict.fromkeys(links))
             return f"https://4pillars.io{unique_links[0]}"
-    except:
-        pass
+    except Exception as e:
+        print(f"프록시 우회 실패: {e}")
     return None
 
 def main():
     latest_url = get_latest_article()
-    if not latest_url:
-        print("정공법 실패. 구글 뉴스 재시도 중...")
-        # (여기에 아까 성공 확률 높았던 구글 뉴스 코드를 백업으로 넣음)
-        rss_url = "https://news.google.com/rss/search?q=site:4pillars.io/ko/articles&hl=ko&gl=KR&ceid=KR:ko"
-        res = requests.get(rss_url, timeout=15)
-        links = re.findall(r'https://4pillars\.io/ko/articles/[a-zA-Z0-9-]+', res.text)
-        if links:
-            latest_url = links[0]
     
     if not latest_url:
-        print("모든 수단 실패. 사이트 차단이 매우 강력합니다.")
+        print("프록시 우회마저 실패했습니다. 포필러스의 방어력이 최상급입니다.")
         return
 
-    # 중복 체크 및 발송 로직은 동일...
+    # 중복 체크 (기존과 동일)
     if os.path.exists("last_url.txt"):
         with open("last_url.txt", "r") as f:
             if f.read().strip() == latest_url:
-                print("이미 처리됨")
+                print(f"이미 처리된 기사입니다.")
                 return
 
     model = genai.GenerativeModel('gemini-1.5-flash')
-    response = model.generate_content(f"요약해줘: {latest_url}")
+    # 기사 요약 프롬프트
+    prompt = f"아래 기사를 한국어로 요약해줘:\nURL: {latest_url}"
+    response = model.generate_content(prompt)
     
+    # 텔레그램 전송
     requests.post(f"https://api.telegram.org/bot{TELE_TOKEN}/sendMessage", 
                   data={"chat_id": CHAT_ID, "text": f"🆕 {latest_url}\n\n{response.text}"})
 
     with open("last_url.txt", "w") as f:
         f.write(latest_url)
-    print("성공")
+    print("✅ 프록시 우회 성공 및 전송 완료!")
 
 if __name__ == "__main__":
     main()
