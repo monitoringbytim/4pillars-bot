@@ -1,0 +1,31 @@
+name: 10min-Bot
+on:
+  schedule:
+    - cron: '*/10 * * * *' # 10분마다 실행
+  workflow_dispatch: # 수동 실행 버튼 활성화
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 파일 쓰기 권한 (중복 방지용)
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: pip install requests google-generativeai
+      - name: Run Script
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python main.py
+      - name: Commit & Push Changes
+        run: |
+          git config --global user.name "bot"
+          git config --global user.email "bot@github.com"
+          git add last_url.txt || exit 0
+          git commit -m "update last url" || exit 0
+          git push
