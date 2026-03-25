@@ -1,54 +1,42 @@
-import os, requests, re, google.generativeai as genai
+import os
+import requests
+import re
+import time
+import google.generativeai as genai
 
-TELE_TOKEN = os.environ['TELEGRAM_TOKEN']
-CHAT_ID = os.environ['CHAT_ID']
-genai.configure(api_key=os.environ['GEMINI_API_KEY'])
+# 환경 변수 설정
+GEMINI_KEY = os.environ.get('GEMINI_API_KEY')
+TELE_TOKEN = os.environ.get('TELEGRAM_TOKEN')
+CHAT_ID = os.environ.get('CHAT_ID')
+
+genai.configure(api_key=GEMINI_KEY)
 
 def get_latest_article():
-    # 🎯 우회로: AllOrigins라는 무료 프록시 서비스를 경유해서 접속합니다.
-    # 이렇게 하면 포필러스는 GitHub IP가 아닌 프록시 서버 IP를 보게 됩니다.
     target_url = "https://4pillars.io/ko/articles"
-    proxy_url = f"https://api.allorigins.win/get?url={target_url}"
     
+    # [차별점] 실제 브라우저와 거의 흡사한 헤더 세팅
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8',
+        'Referer': 'https://www.google.com/', # 구글에서 타고 들어온 척 합니다.
+    }
+
     try:
-        res = requests.get(proxy_url, timeout=30)
-        # 프록시 서비스는 실제 내용을 'contents'라는 키 안에 담아 줍니다.
-        html_content = res.json().get('contents', '')
+        print(f"📡 포필러스 직접 연결 시도...")
+        # 세션을 사용해 쿠키 등을 유지하며 접근합니다.
+        session = requests.Session()
+        res = session.get(target_url, headers=headers, timeout=20)
         
-        links = re.findall(r'/ko/articles/[a-zA-Z0-9-]+', html_content)
-        if links:
-            unique_links = list(dict.fromkeys(links))
-            return f"https://4pillars.io{unique_links[0]}"
+        if res.status_code == 200:
+            print("✅ 접속 성공! HTML 분석 중...")
+            # 링크 추출 (/ko/articles/...)
+            links = re.findall(r'/ko/articles/[a-zA-Z0-9-]+', res.text)
+            if links:
+                unique_links = list(dict.fromkeys(links))
+                return f"https://4pillars.io{unique_links[0]}"
+        else:
+            print(f"❌ 접속 차단됨 (코드: {res.status_code})")
     except Exception as e:
-        print(f"프록시 우회 실패: {e}")
+        print(f"🚨 접속 중 에러: {e}")
     return None
-
-def main():
-    latest_url = get_latest_article()
-    
-    if not latest_url:
-        print("프록시 우회마저 실패했습니다. 포필러스의 방어력이 최상급입니다.")
-        return
-
-    # 중복 체크 (기존과 동일)
-    if os.path.exists("last_url.txt"):
-        with open("last_url.txt", "r") as f:
-            if f.read().strip() == latest_url:
-                print(f"이미 처리된 기사입니다.")
-                return
-
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    # 기사 요약 프롬프트
-    prompt = f"아래 기사를 한국어로 요약해줘:\nURL: {latest_url}"
-    response = model.generate_content(prompt)
-    
-    # 텔레그램 전송
-    requests.post(f"https://api.telegram.org/bot{TELE_TOKEN}/sendMessage", 
-                  data={"chat_id": CHAT_ID, "text": f"🆕 {latest_url}\n\n{response.text}"})
-
-    with open("last_url.txt", "w") as f:
-        f.write(latest_url)
-    print("✅ 프록시 우회 성공 및 전송 완료!")
-
-if __name__ == "__main__":
-    main()
